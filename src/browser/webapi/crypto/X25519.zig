@@ -115,6 +115,12 @@ pub fn deriveBits(
     length_in_bits: usize,
     exec: *const Execution,
 ) !js.ArrayBuffer {
+    // The peer must be an X25519 public key, as EC.deriveBits requires of its
+    // own: another kind of key has no EVP_PKEY to hand libcrypto.
+    if (public._type != .x25519 or public._kind != .public) {
+        return error.InvalidAccessError;
+    }
+
     const ctx = crypto.EVP_PKEY_CTX_new(private.getKeyObject(), null) orelse {
         // Failed on our end.
         return error.Internal;

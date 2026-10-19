@@ -202,10 +202,11 @@ pub fn importKey(
     }
 
     // HKDF / PBKDF2: key-derivation inputs. The raw bytes are the key; there's
-    // no length constraint and these keys are non-extractable.
+    // no length constraint and these keys are never extractable.
     inline for ([_][]const u8{ "HKDF", "PBKDF2" }) |derive_name| {
         if (eqlIgnoreCase(name, derive_name)) {
             const mask = try common.usageMask(&.{ "deriveKey", "deriveBits" }, key_usages);
+            if (extractable) return error.SyntaxError;
             const crypto_key = try CryptoKey.init(exec, .{
                 ._type = .derive,
                 ._kind = .secret,
@@ -375,13 +376,15 @@ fn exportAs(format: []const u8, key: *CryptoKey, exec: *const Execution) !Export
     return local.typeError("invalid format");
 }
 
-/// The JSON Web Key returned for symmetric ("oct") keys.
+/// The JSON Web Key returned for symmetric ("oct") keys. Members are listed
+/// in lexicographic order, the order browsers return a JsonWebKey in, which is
+/// also the order wrapKey serializes them in.
 const JwkSecret = struct {
-    kty: []const u8 = "oct",
-    k: []const u8,
     alg: []const u8,
     ext: bool,
+    k: []const u8,
     key_ops: []const []const u8,
+    kty: []const u8 = "oct",
 };
 
 fn exportJwk(key: *CryptoKey, exec: *const Execution) !Jwk {
@@ -398,9 +401,9 @@ fn exportJwk(key: *CryptoKey, exec: *const Execution) !Jwk {
     };
 
     return .{ .secret = .{
-        .k = try common.base64Encode(exec.local_arena, key._key),
         .alg = alg,
         .ext = key._extractable,
+        .k = try common.base64Encode(exec.local_arena, key._key),
         .key_ops = try key.getUsages(exec),
     } };
 }
@@ -495,7 +498,7 @@ fn deriveRaw(
             if (eqlIgnoreCase(params.name, "X25519")) {
                 // null length means "derive the full shared secret" (256 bits).
                 const result = X25519.deriveBits(base_key, params.public, length orelse 256, exec) catch |err| switch (err) {
-                    error.OutOfMemory => return error.OutOfMemory,
+                    error.OutOfMemory, error.InvalidAccessError => |e| return e,
                     else => return error.OperationError,
                 };
                 return result.values;
